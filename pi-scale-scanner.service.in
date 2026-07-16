@@ -6,7 +6,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=@USER@
-SupplementaryGroups=video gpio
+SupplementaryGroups=video dialout
 WorkingDirectory=@APP_DIR@
 ExecStart=@APP_DIR@/.venv/bin/python @APP_DIR@/app.py
 Restart=on-failure
