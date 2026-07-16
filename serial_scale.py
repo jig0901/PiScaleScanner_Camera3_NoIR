@@ -22,6 +22,7 @@ class SerialScale(threading.Thread):
         self.error = "Connect the ESP32-S3 USB cable"
         self.last_reading = 0.0
         self.next_id = 1
+        self._pending = {}
 
     @staticmethod
     def ports():
@@ -56,9 +57,9 @@ class SerialScale(threading.Thread):
             try:
                 while True:
                     command = self.commands.get_nowait()
-                    link.write((command["line"] + "\n").encode())
-                    link.flush()
-                    command["sent"] = True
+                    if time.monotonic() <= command["deadline"]:
+                        link.write((command["line"] + "\n").encode())
+                        link.flush()
             except queue.Empty:
                 pass
             line = link.readline()
@@ -93,11 +94,9 @@ class SerialScale(threading.Thread):
             command_id = self.next_id
             self.next_id += 1
         pending = {"id": command_id, "event": threading.Event(), "response": None}
-        if not hasattr(self, "_pending"):
-            self._pending = {}
         self._pending[command_id] = pending
         line = command + (f" {argument}" if argument is not None else "") + f" {command_id}"
-        self.commands.put({"line": line, "sent": False})
+        self.commands.put({"line": line, "deadline": time.monotonic() + timeout})
         if not pending["event"].wait(timeout):
             self._pending.pop(command_id, None)
             raise TimeoutError(f"ESP32 did not finish {command.lower()}")
