@@ -1,2 +1,0 @@
-"""Vendored third-party drivers."""
-
