@@ -1,113 +1,95 @@
-# Raspberry Pi 4 Scale + Barcode Scanner — Camera Module 3 NoIR
+# Pi Scale + Camera 3 Barcode Scanner
 
-For a Raspberry Pi 4, Raspberry Pi Camera Module 3 NoIR (IMX708), HX711, and
-load cell. The camera and scale run independently so a slow HX711 read cannot
-freeze the preview. Camera Module 3 runs continuous full-range autofocus, with
-a **Refocus camera** button for an immediate focus cycle.
+This version deliberately splits the work between two computers:
 
-## Wiring
+`Load cell → HX711 → ESP32-S3 → USB serial → Raspberry Pi 4`
 
-Always shut down and unplug the Pi before connecting the camera ribbon.
+`Raspberry Pi Camera Module 3 NoIR → Raspberry Pi barcode scanner`
 
-| HX711 | Raspberry Pi 4 |
+The ESP32 performs the timing-sensitive HX711 reads. The Pi handles the web
+page, calibration controls, autofocus camera preview, and barcode decoding.
+Calibration is stored in ESP32 flash and survives restarts.
+
+## 1. Wire the scale to the ESP32-S3
+
+Power everything off first.
+
+| HX711 | ESP32-S3 |
 |---|---|
-| VCC | 3.3 V, physical pin 1 |
-| GND | Ground, physical pin 6 |
-| DOUT / DT | GPIO5, physical pin 29 |
-| SCK / CLK | GPIO6, physical pin 31 |
+| VCC | 3.3 V |
+| GND | GND |
+| DOUT / DT | GPIO14 |
+| SCK / CLK | GPIO21 |
 
-Do not power HX711 VCC from 5 V. Raspberry Pi GPIO is not 5 V tolerant.
+Connect the load cell to the HX711 labels `E+`, `E-`, `A+`, and `A-`. Wire
+colors vary, so use the load-cell datasheet rather than relying on color.
 
-Typical four-wire load-cell colors are not universal. Follow the labels on
-your HX711/load-cell documentation for E+, E-, A+, and A-.
+## 2. Flash the ESP32 bridge
 
-## Raspberry Pi setup
+1. Install Arduino IDE and the Espressif ESP32 board package.
+2. Open `esp32_scale_bridge/esp32_scale_bridge.ino`.
+3. Select **ESP32S3 Dev Module** and the correct USB port.
+4. Set **USB CDC On Boot: Enabled**.
+5. Upload, then open Serial Monitor at 115200 baud. JSON readings should appear.
+6. Close Serial Monitor and plug that ESP32 USB cable into the Raspberry Pi.
 
-1. Install Raspberry Pi OS 64-bit and complete Wi-Fi setup.
-2. Connect the Camera Module 3 ribbon to the Pi 4 CSI connector with power off.
-3. Copy this entire folder to the Pi.
-4. In a terminal, run:
+If your board exposes separate USB and UART connectors, use the connector that
+produced the Arduino Serial Monitor output.
 
-   ```bash
-   cd PiScaleScanner
-   chmod +x install.sh
-   ./install.sh
-   sudo reboot
-   ```
+## 3. Install on Raspberry Pi 4
 
-5. After reboot, find the address with `hostname -I`, then open
-   `http://PI_ADDRESS:8080` from a device on the same network.
+Connect Camera Module 3 NoIR to the CSI connector while power is off. Then:
 
-The installer supports Raspberry Pi OS Trixie, where the ZBar library package
-is named `libzbar0t64` and `pyzbar` must be installed into a virtual
-environment. Do not run the installer with `sudo`; it invokes `sudo` only for
-the individual system operations that require it.
+```bash
+git clone https://github.com/jig0901/PiScaleScanner_Camera3_NoIR.git
+cd PiScaleScanner_Camera3_NoIR
+chmod +x install.sh
+./install.sh
+sudo reboot
+```
 
-## First calibration
+After reboot, open `http://PI_ADDRESS:8080`. Find the address with `hostname -I`.
+The installer adds your user and service to `video` and `dialout`, installs the
+Trixie-compatible ZBar packages, and enables automatic startup.
 
-1. Remove everything from the platform and select **Start calibration**. This
-   switches out of continuous scale mode and tares 25 samples.
-2. When instructed, place an accurately known weight in the center.
+## 4. Calibrate
+
+1. Leave the platform empty and select **Start calibration**.
+2. Put a known weight in the center.
 3. Enter its weight in grams and select **Finish calibration**.
-4. The saved reference unit is applied and **Start scale** mode resumes.
-   Calibration is stored in `scale_config.json` and survives restarts.
+4. Select **Start scale** if needed. Use **Tare** whenever the empty platform
+   does not read zero.
 
-The page has separate **Start calibration** and **Start scale** buttons so the
-two workflows cannot drive the HX711 at the same time. Live raw value, offset,
-reference unit, mode, and errors are visible in the interface.
+A negative reference unit is valid; it means the load-cell signal direction is
+reversed. The web page shows the live raw value, offset, reference unit, USB
+device, and any ESP32 error.
 
-After a barcode leaves the camera view, the scanner automatically rearms in
-about 1.5 seconds. Use **Scan again** to clear the result immediately.
-
-A negative calibration factor is valid when the load-cell signal direction is
-reversed. It will still display positive weights after calibration.
-
-## Standalone scale tests
-
-Stop the web service before using either script because only one process may
-own GPIO5/GPIO6:
-
-```bash
-sudo systemctl stop pi-scale-scanner
-.venv/bin/python calibration.py
-.venv/bin/python scale.py
-sudo systemctl start pi-scale-scanner
-```
-
-`calibration.py` implements the guide's trimmed 25-sample calibration flow.
-`scale.py` provides continuous five-sample median readings and performs the
-guide's HX711 power-down/power-up sequence between displayed weights.
-
-## Camera Module 3 NoIR
-
-The IMX708 autofocus is enabled continuously over its full focus range. Hold a
-barcode still at the intended working distance and use **Refocus camera** if it
-does not lock promptly. Do not twist the Camera Module 3 lens.
-
-NoIR means the sensor has no infrared-cut filter; it does not mean the camera
-supplies infrared light. Printed barcodes decode most reliably with bright,
-even visible lighting that does not create glare. An IR illuminator is useful
-for night vision, but many inks and packages have poor IR contrast.
-
-Test the camera independently with:
-
-```bash
-rpicam-hello --timeout 0
-```
+The barcode scanner automatically rearms 1.5 seconds after the code leaves the
+image. **Scan again** clears it immediately. Camera Module 3 uses continuous
+full-range autofocus; **Refocus camera** starts a fresh focus cycle.
 
 ## Diagnostics
 
+Check that Linux sees the ESP32:
+
 ```bash
-systemctl status pi-scale-scanner
+ls -l /dev/serial/by-id/
+ls -l /dev/ttyACM* /dev/ttyUSB* 2>/dev/null
+groups
+```
+
+Check the application:
+
+```bash
+systemctl status pi-scale-scanner --no-pager
 journalctl -u pi-scale-scanner -f
 ```
 
-If the camera is missing, run `rpicam-hello --list-cameras`; Camera Module 3
-should identify as `imx708`. If DOUT remains high, verify HX711 power, common
-ground, and the GPIO5/GPIO6 wiring.
+If the ESP32 appears but the page cannot open it, ensure `dialout` appears in
+`groups`, reboot, and make sure Arduino Serial Monitor is closed. Only one
+program can own the serial port. Test the camera independently with
+`rpicam-hello --list-cameras`; the Module 3 NoIR should appear as `imx708_noir`.
 
-The HX711 implementation is adapted from `tatobari/hx711py`, the driver used by
-the Hugh Evans guide. It samples DOUT after returning SCK LOW, uses median and
-trimmed-mean sampling, and power-cycles between displayed weights. The vendored
-copy adds Trixie-compatible GPIO allocation and a ready timeout so a missing
-HX711 cannot freeze the web server. See `THIRD_PARTY_NOTICES.md`.
+If the raw value is fixed at zero or the ESP32 reports DOUT high, the problem is
+between the ESP32, HX711, and load cell—not the Pi camera. Recheck 3.3 V, common
+ground, GPIO14/GPIO21, and the HX711/load-cell terminals.
