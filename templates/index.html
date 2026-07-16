@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Scale + Barcode Scanner</title>
+  <style>
+    *{box-sizing:border-box}body{margin:0;background:#0b1220;color:#e5edf8;font-family:system-ui,sans-serif;padding:20px}main{max-width:1050px;margin:auto}
+    h1{font-size:1.3rem}.grid{display:grid;grid-template-columns:minmax(0,2fr) minmax(260px,1fr);gap:18px}.card{background:#172033;border:1px solid #2c3b55;border-radius:16px;padding:16px}
+    img{display:block;width:100%;border-radius:10px;background:#000;aspect-ratio:16/9;object-fit:contain}.number{font-size:3rem;font-weight:800;color:#38bdf8}.barcode{font-size:1.45rem;font-weight:700;overflow-wrap:anywhere}
+    button,input{font:inherit;border-radius:9px;padding:11px;border:1px solid #475569}button{cursor:pointer;background:#0284c7;color:white;font-weight:700}button.secondary{background:#475569}input{width:120px}.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.muted{color:#94a3b8}.error{color:#fca5a5;min-height:1.4em}@media(max-width:760px){.grid{grid-template-columns:1fr}}
+  </style>
+</head>
+<body><main>
+  <h1>Raspberry Pi Scale + Barcode Scanner</h1>
+  <div class="grid">
+    <section class="card"><img src="/video" alt="Camera preview"><div class="row"><button onclick="refocus()">Refocus camera</button></div><p class="muted">Camera Module 3 NoIR uses continuous autofocus. Hold the barcode still under even visible light.</p><div id="cameraModel" class="muted"></div></section>
+    <section>
+      <div class="card"><div class="muted">Weight · <span id="scaleState">Starting…</span></div><div class="number"><span id="weight">—</span> g</div><div id="raw" class="muted"></div><div id="scaleDetails" class="muted"></div><div id="scaleError" class="error"></div><div class="row"><button onclick="startScale()">Start scale</button><button class="secondary" onclick="tare()">Tare</button></div></div>
+      <div class="card" style="margin-top:18px"><div class="muted">Barcode</div><div id="barcode" class="barcode">Waiting…</div><div id="type" class="muted"></div><div id="cameraError" class="error"></div><div class="row"><button onclick="rearm()">Scan again</button></div><p class="muted">The scanner also resets automatically after the barcode leaves the view.</p></div>
+      <div class="card" style="margin-top:18px"><div class="muted">Calibration mode</div><p id="calHelp">Remove all weight, then start calibration.</p><div class="row"><button onclick="startCalibration()">Start calibration</button></div><div class="row"><input id="grams" type="number" min="1" step="0.1" placeholder="known grams"><button class="secondary" onclick="calibrate()">Finish calibration</button></div></div>
+    </section>
+  </div>
+</main><script>
+async function update(){try{const s=await fetch('/api/status').then(r=>r.json());document.getElementById('weight').textContent=s.weight_g==null?'—':s.weight_g.toFixed(1);document.getElementById('raw').textContent=s.raw==null?'':'Raw: '+s.raw;document.getElementById('scaleState').textContent=s.scale_mode==='calibration'?'Calibration':(s.scale_ready?'Ready':'Recovering');document.getElementById('scaleDetails').textContent='Reference: '+Number(s.reference_unit||0).toFixed(3)+' · Offset: '+Number(s.offset||0).toFixed(1);document.getElementById('barcode').textContent=s.barcode||'Waiting…';document.getElementById('type').textContent=s.barcode_type||'';document.getElementById('scaleError').textContent=s.error||'';document.getElementById('cameraError').textContent=s.camera_error||'';document.getElementById('cameraModel').textContent='Detected camera: '+(s.camera_model||'unknown');}catch(e){document.getElementById('scaleError').textContent='Web connection lost';}}
+async function tare(){const r=await fetch('/api/tare',{method:'POST'});const d=await r.json();if(!d.ok)alert(d.error);}
+async function startCalibration(){document.getElementById('calHelp').textContent='Taring empty scale…';const r=await fetch('/api/calibration/start',{method:'POST'});const d=await r.json();if(!d.ok){alert(d.error);return;}document.getElementById('calHelp').textContent='Now place the known weight, enter its grams, and select Finish calibration.';}
+async function calibrate(){const grams=Number(document.getElementById('grams').value);const r=await fetch('/api/calibrate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grams})});const d=await r.json();if(!d.ok)alert(d.error);else{document.getElementById('calHelp').textContent='Calibration saved. Scale mode is running.';alert('Calibration saved');}}
+async function startScale(){const r=await fetch('/api/scale/start',{method:'POST'});const d=await r.json();if(!d.ok)alert(d.error);}
+async function rearm(){await fetch('/api/rearm',{method:'POST'});document.getElementById('barcode').textContent='Waiting…';document.getElementById('type').textContent='';}
+async function refocus(){const r=await fetch('/api/refocus',{method:'POST'});const d=await r.json();if(!d.ok)alert(d.error);}
+setInterval(update,400);update();
+</script></body></html>
